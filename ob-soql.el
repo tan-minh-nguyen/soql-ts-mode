@@ -1,4 +1,4 @@
-;;; soql-ob.el --- org-babel functions for SOQL evaluation -*- lexical-binding: t -*-
+;;; ob-soql.el --- org-babel functions for SOQL evaluation -*- lexical-binding: t -*-
 
 ;; Copyright (C) 2025 Tan Nguyen
 
@@ -39,7 +39,7 @@
 (require 'ob-eval)
 (require 'salesforce-data)
 (require 'salesforce-project)
-(require 'ob-soql-core)
+(require 'ob-soql-utils)
 (require 'tablist-plus)
 
 (add-to-list 'org-babel-tangle-lang-exts '("soql" . "soql"))
@@ -102,9 +102,9 @@ BODY is the SOQL query, PARAMS are header arguments."
          (full-body (org-babel-expand-body:soql body params processed-params))
          (file-temp (make-temp-file "soql"))
          (org (ob-soql--get-param :org processed-params))
-         (org-url (ob-soql-core--org-url org))
+         (org-url (ob-soql-utils--org-url org))
          (output-format (intern (or (ob-soql--get-param :output processed-params) "org-table")))
-         (sobject (ob-soql-core--extract-sobject full-body))
+         (sobject (ob-soql-utils--extract-sobject full-body))
          (editable (ob-soql--get-param :editable processed-params)))
 
     (if (and org org-url)
@@ -173,6 +173,6 @@ specifying a var of the same value."
 Return the initialized session."
   (unless (string= session "none")))
 
-(provide 'soql-ob)
+(provide 'ob-soql)
 
-;;; soql-ob.el ends here
+;;; ob-soql.el ends here

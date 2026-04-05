@@ -2,13 +2,13 @@
 
 ;; Copyright (C) 2024 Free Software Foundation, Inc.
 
-;; Author     : Tan Nguyen
-;; Maintainer : Tan Nguyen
+;; Author     : Tan Nguyen <tan.nguyen.w.information@gmail.com>
+;; Maintainer : Tan Nguyen <tan.nguyen.w.information@gmail.com>
 ;; Created    : December 2024
 ;; Keywords   : soql salesforce languages tree-sitter
 ;; Package-Requires: ((emacs "29.1"))
 ;; Version    : 1.0.0
-;; URL        : https://github.com/nverno/soql-ts-mode
+;; URL        : https://github.com/tan-minh-nguyen/soql-ts-mode
 
 ;; This file is part of GNU Emacs.
 
@@ -27,26 +27,8 @@
 
 ;;; Commentary:
 ;;
-;; Major mode for editing Salesforce Object Query Language (SOQL) files,
-;; powered by tree-sitter.
-;;
-;; Features:
-;; - Syntax highlighting using tree-sitter
-;; - Intelligent indentation for queries and subqueries
-;; - Imenu navigation for objects, fields, and subqueries
-;; - Code folding support (requires treesit-fold)
-;;
-;; This package provides standalone SOQL language support.
-;; For Salesforce CLI integration (org-babel execution, SObject completion),
-;; install salesforce-minor-mode which provides extensions.
-;;
-;; Extensions (optional):
-;; - soql-language-server: LSP configuration
-;; - soql-fold: Code folding via treesit-fold
-;;
-;; Salesforce extensions (require salesforce-minor-mode):
-;; - ob-soql: Org-babel SOQL execution
-;; - ob-soql-core: SOQL-to-Apex variable passing
+;; Tree-sitter powered major mode for Salesforce SOQL queries.
+;; Provides syntax highlighting, indentation, imenu, and LSP support.
 
 ;;; Code:
 
@@ -56,8 +38,6 @@
 (require 'c-ts-common) ; For comment handling
 
 ;; Optional extensions
-(when (require 'soql-language-server nil :noerror)
-  (message "soql-ts-mode: LSP support loaded"))
 (when (require 'treesit-fold nil :noerror)
   (require 'soql-fold nil :noerror))
 
@@ -79,6 +59,41 @@
   :type 'integer
   :safe 'integerp
   :group 'soql)
+
+;;; Language Server Support
+
+(defcustom soql-lsp-path nil
+  "Path to SOQL language server executable.
+Can be an absolute path or a command name in PATH."
+  :type 'string
+  :group 'soql)
+
+(defcustom soql-lsp-eglot-config '()
+  "Additional configuration for Eglot LSP initialization.
+This should be a plist of initialization options passed to the language server."
+  :type 'plist
+  :group 'soql)
+
+(defun soql-lsp--server-command ()
+  "Return command to run SOQL language server."
+  `(,soql-lsp-path "--stdio"))
+
+;;;###autoload
+(defun soql-lsp-setup-eglot ()
+  "Configure Eglot for SOQL language server.
+Call this before using `eglot-ensure' with `soql-ts-mode'."
+  (with-eval-after-load 'eglot
+    (add-to-list 'eglot-server-programs
+                 (cons soql-ts-mode `(,@(soql-lsp--server-command)
+                                      ,@soql-lsp-eglot-config)))))
+
+;;;###autoload
+(defun soql-lsp-setup-bridge ()
+  "Configure LSP Bridge for SOQL language server.
+Call this before using `lsp-bridge-mode' with `soql-ts-mode'."
+  (with-eval-after-load 'lsp-bridge
+    (add-to-list 'lsp-bridge-single-lang-server-mode-list
+                 '(soql-ts-mode . "soql"))))
 
 ;;; Faces
 
@@ -226,15 +241,10 @@
 
 (defun soql-ts-mode--setup-completion ()
   "Setup completion backend based on available packages.
-Prefers completion-at-point (Corfu compatible), falls back to Company."
-  (cond
-   ;; Prefer CAPF (works with Corfu, Company-capf, built-in)
-   ((require 'soql-capf nil t)
-    (soql-capf-setup))
-   ;; Fallback to Company backend
-   ((and (require 'company nil t)
-         (require 'soql-company nil t))
-    (soql-company-setup))))
+Uses Company backend with SObject field completion from extensions."
+  (when (and (require 'company nil t)
+             (require 'soql-company nil t))
+    (soql-company-setup)))
 
 ;;; Mode Setup
 

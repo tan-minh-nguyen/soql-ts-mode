@@ -1,4 +1,4 @@
-;;; ob-soql-core.el --- Core functionality for SOQL org-babel -*- lexical-binding: t -*-
+;;; ob-soql-utils.el --- Utility functions for SOQL org-babel -*- lexical-binding: t -*-
 
 ;; Copyright (C) 2025 Free Software Foundation, Inc.
 
@@ -87,7 +87,7 @@ SOBJECT is the object type, EDITABLE enables edit actions."
 ;;; Section 2: Org-Table Display
 ;;; ========================================
 
-(defun ob-soql-core--extract-sobject (query)
+(defun ob-soql-utils--extract-sobject (query)
   "Extract primary SObject from SOQL QUERY."
   (when (string-match "FROM[[:space:]]+\\([[:alnum:]_]+\\)" query)
     (match-string 1 query)))
@@ -103,11 +103,11 @@ SOBJECT is the object type, EDITABLE enables edit actions."
       (when (buffer-live-p buf)
         (kill-buffer buf)))))
 
-(defun ob-soql-core--org-url (org)
+(defun ob-soql-utils--org-url (org)
   "Return the Salesforce instance URL for ORG."
   (salesforce-project--user-data org "instanceUrl"))
 
-(defun ob-soql-core--modify-csv (csv org-hyperlink)
+(defun ob-soql-utils--modify-csv (csv org-hyperlink)
   "Return CSV after converting Id field values into ORG-HYPERLINK."
   (if (or (null csv) (string-empty-p csv))
       csv
@@ -125,17 +125,17 @@ SOBJECT is the object type, EDITABLE enables edit actions."
                            (let ((cols (string-split line ",")))
                              (when (< id-pos (length cols))
                                (setf (nth id-pos cols)
-                                     (ob-soql-core--convert-id-to-hyperlink
+                                     (ob-soql-utils--convert-id-to-hyperlink
                                       (nth id-pos cols) org-hyperlink)))
                              (string-join cols ",")))
                          rows))
            "\n")
         csv))))
 
-(defun ob-soql-core--convert-id-to-hyperlink (id org-hyperlink)
+(defun ob-soql-utils--convert-id-to-hyperlink (id org-hyperlink)
   "Convert Salesforce ID into an ORG-HYPERLINK."
   (format "[[%s/%s][%s]]" org-hyperlink id id))
 
-(provide 'ob-soql-core)
+(provide 'ob-soql-utils)
 
-;;; ob-soql-core.el ends here
+;;; ob-soql-utils.el ends here

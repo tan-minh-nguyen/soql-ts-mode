@@ -1,5 +1,8 @@
 ;;; soql-completion.el --- Core SOQL completion logic -*- lexical-binding: t; -*-
 
+;; Status: WORK IN PROGRESS
+;; This module is under active development. API may change.
+
 ;;; Commentary:
 ;; Backend-agnostic SOQL completion core.
 ;; Provides field completion for SOQL queries using tree-sitter and SObject metadata.
