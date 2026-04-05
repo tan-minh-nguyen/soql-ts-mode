@@ -1,0 +1,86 @@
+#+TITLE: soql-ts-mode
+#+AUTHOR: Tan Nguyen
+#+EMAIL: tan.nguyen.w.information@gmail.com
+
+* soql-ts-mode
+
+Tree-sitter based major mode for Salesforce SOQL in Emacs.
+
+** Features
+
+- Syntax highlighting via tree-sitter
+- Indentation support
+- Completion at point (CAPF)
+- Org-babel integration
+
+** Requirements
+
+- Emacs 29.1+ (with tree-sitter support)
+- [[https://github.com/aheber/tree-sitter-sfapex][tree-sitter-sfapex]] grammar (SOQL)
+
+** Installation
+
+*** Grammar Installation
+
+#+begin_src emacs-lisp
+(add-to-list 'treesit-language-source-alist
+             '(soql "https://github.com/aheber/tree-sitter-sfapex" "main" "soql/src"))
+(treesit-install-language-grammar 'soql)
+#+end_src
+
+*** Package Installation
+
+Add to your load-path:
+
+#+begin_src emacs-lisp
+(add-to-list 'load-path "/path/to/soql-ts-mode")
+(require 'soql-ts-mode)
+#+end_src
+
+** Standalone Usage
+
+The core =soql-ts-mode= works independently without Salesforce CLI:
+
+#+begin_src emacs-lisp
+(require 'soql-ts-mode)
+;; .soql files automatically use soql-ts-mode
+#+end_src
+
+** Salesforce Integration (Optional)
+
+For full Salesforce development experience with org-babel execution:
+
+#+begin_src emacs-lisp
+;; Load Salesforce integration
+(require 'salesforce-mode)
+
+;; Enable soql-ts-mode extensions
+(add-to-list 'load-path "/path/to/soql-ts-mode/extensions")
+(require 'soql-ob)          ;; Org-babel SOQL execution
+(require 'soql-completion)  ;; SObject field completion
+#+end_src
+
+** Extensions
+
+| Extension | Purpose | Requires |
+|-----------+---------+----------|
+| soql-ob | Org-babel for SOQL | salesforce-data, salesforce-project |
+| soql-completion | SObject field completion | salesforce-core |
+| soql-language-server | LSP configuration | lsp-mode or eglot |
+| soql-fold | Code folding | treesit-fold |
+
+** Org-Babel Usage
+
+With salesforce-minor-mode installed:
+
+#+begin_src org
+,#+BEGIN_SRC soql :org my-sandbox
+SELECT Id, Name FROM Account LIMIT 10
+,#+END_SRC
+#+end_src
+
+Results display as org-table with clickable record IDs.
+
+** License
+
+GPL-3.0

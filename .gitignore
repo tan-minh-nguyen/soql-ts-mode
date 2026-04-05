@@ -1,0 +1,19 @@
+# Byte-compiled files
+*.elc
+
+# Backup files
+*~
+\#*\#
+.\#*
+
+# Auto-save files
+.saves-*
+
+# Compiled native files
+*.eln
+
+# Cask dependencies
+.cask/
+
+# Package archives
+*.tar
