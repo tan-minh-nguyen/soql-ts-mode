@@ -73,7 +73,7 @@ This should be a plist of initialization options passed to the language server."
 
 (with-eval-after-load 'eglot
   (add-to-list 'eglot-server-programs
-               (cons soql-ts-mode
+               (cons 'soql-ts-mode
                      (lambda (&rest _)
                        `( ,soql-ts-mode-lsp-bin "--stdio"
                           ,@soql-ts-mode-lsp-eglot-config)))))
