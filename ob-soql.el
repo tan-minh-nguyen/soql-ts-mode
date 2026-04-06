@@ -44,6 +44,9 @@
 
 (add-to-list 'org-babel-tangle-lang-exts '("soql" . "soql"))
 
+(add-to-list 'org-src-lang-modes '("soql" . soql-ts))
+(add-to-list 'org-babel-load-languages '(soql . t))
+
 ;; optionally declare default header arguments for this language
 (defvar org-babel-default-header-args:soql `((:results . "output raw table replace")
                                              (:org . "")

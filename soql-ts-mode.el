@@ -37,10 +37,6 @@
 (eval-when-compile (require 'rx))
 (require 'c-ts-common) ; For comment handling
 
-;; Optional extensions
-(when (require 'treesit-fold nil :noerror)
-  (require 'soql-fold nil :noerror))
-
 (declare-function treesit-parser-create "treesit.c")
 (declare-function treesit-node-start "treesit.c")
 (declare-function treesit-node-type "treesit.c")
@@ -62,38 +58,25 @@
 
 ;;; Language Server Support
 
-(defcustom soql-lsp-path nil
+(defcustom soql-ts-mode-lsp-bin "soql-language-server"
   "Path to SOQL language server executable.
-Can be an absolute path or a command name in PATH."
+
+https://github.com/forcedotcom/soql-language-server"
   :type 'string
   :group 'soql)
 
-(defcustom soql-lsp-eglot-config '()
+(defcustom soql-ts-mode-lsp-eglot-config '()
   "Additional configuration for Eglot LSP initialization.
 This should be a plist of initialization options passed to the language server."
   :type 'plist
   :group 'soql)
 
-(defun soql-lsp--server-command ()
-  "Return command to run SOQL language server."
-  `(,soql-lsp-path "--stdio"))
-
-;;;###autoload
-(defun soql-lsp-setup-eglot ()
-  "Configure Eglot for SOQL language server.
-Call this before using `eglot-ensure' with `soql-ts-mode'."
-  (with-eval-after-load 'eglot
-    (add-to-list 'eglot-server-programs
-                 (cons soql-ts-mode `(,@(soql-lsp--server-command)
-                                      ,@soql-lsp-eglot-config)))))
-
-;;;###autoload
-(defun soql-lsp-setup-bridge ()
-  "Configure LSP Bridge for SOQL language server.
-Call this before using `lsp-bridge-mode' with `soql-ts-mode'."
-  (with-eval-after-load 'lsp-bridge
-    (add-to-list 'lsp-bridge-single-lang-server-mode-list
-                 '(soql-ts-mode . "soql"))))
+(with-eval-after-load 'eglot
+  (add-to-list 'eglot-server-programs
+               (cons soql-ts-mode
+                     (lambda (&rest _)
+                       `( ,soql-ts-mode-lsp-bin "--stdio"
+                          ,@soql-ts-mode-lsp-eglot-config)))))
 
 ;;; Faces
 
@@ -301,17 +284,8 @@ Uses Company backend with SObject field completion from extensions."
   (treesit-parser-create 'soql)
   (soql-ts-mode-setup))
 
-;;; Org Integration
-
-(with-eval-after-load 'org
-  (add-to-list 'org-src-lang-modes '("soql" . soql-ts))
-  (add-to-list 'org-babel-load-languages '(soql . t)))
-
 ;;; Auto Mode
-
-;;;###autoload
-(when (treesit-ready-p 'soql)
-  (add-to-list 'auto-mode-alist '("\\.soql\\'" . soql-ts-mode)))
+(add-to-list 'auto-mode-alist '("\\.soql\\'" . soql-ts-mode))
 
 (when (functionp 'derived-mode-add-parents)
   (derived-mode-add-parents 'soql-ts-mode '(soql-mode)))
