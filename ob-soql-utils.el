@@ -47,21 +47,25 @@
          (single-line (string-join (split-string trimmed "\n" t "[ \t]+") " ")))
     (replace-regexp-in-string "[ \t]+" " " single-line)))
 
-(defun ob-soql--convert-csv-to-lisp-data (csv-content)
+(defun ob-soql--parse-csv (process)
   "Convert csv to org-table then lisp-data"
-  (with-temp-buffer
-    (insert csv-content)
-    (org-table-convert-region (point-min) (point-max))
-    (org-table-to-lisp)))
+  (let ((csv-content (emacs-pp-parser-raw process)))
+    (with-temp-buffer
+      (insert csv-content)
+      (org-table-convert-region
+       (point-min)
+       (point-max))
+      (org-table-to-lisp
+       (buffer-substring-no-properties (point-min) (point-max))))))
 
-(defun ob-soql--tablist-table (columns data &rest args)
+(cl-defun ob-soql--create-tablist (columns &rest args &key data &allow-other-keys)
   "Display CSV results in a tablist-plus buffer.
 CSV is the raw data, URL for hyperlinks, QUERY for context.
 SOBJECT is the object type, EDITABLE enables edit actions."
-  (let ((table (apply #'tablist-plus-create-table
-                      columns :data data args)))
-    (tablist-plus-table-render table)
-    (pop-to-buffer (tablist-plus-table-buffer table))))
+  (declare (indent 1))
+  (let ((args (seq-difference args (list :data data))))
+    (apply #'tablist-plus-create-table
+           columns :data data args)))
 
 (defun ob-soql-vars--extract-sobject (query)
   "Extract SObject type from SOQL QUERY."
@@ -83,11 +87,7 @@ SOBJECT is the object type, EDITABLE enables edit actions."
               (name (nth 4 info)))
     (ob-soql-vars-store-query name body)))
 
-;;; ========================================
-;;; Section 2: Org-Table Display
-;;; ========================================
-
-(defun ob-soql-utils--extract-sobject (query)
+(defun ob-soql--extract-sobject (query)
   "Extract primary SObject from SOQL QUERY."
   (when (string-match "FROM[[:space:]]+\\([[:alnum:]_]+\\)" query)
     (match-string 1 query)))

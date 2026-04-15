@@ -53,7 +53,6 @@
                                              (:workspace . "")
                                              (:limit . "2000")
                                              (:output . "org-table")
-                                             (:sobject . "")
                                              (:editable . nil)))
 
 (defvar org-babel-default-inline-header-args:soql `((:results . "output raw table replace")
@@ -61,7 +60,6 @@
                                                     (:workspace . "")
                                                     (:limit . "2000")
                                                     (:output . "org-table")
-                                                    (:sobject . "")
                                                     (:editable . nil)))
 
 ;; This function expands the body of a source code block by doing things like
@@ -100,50 +98,69 @@
 (defun org-babel-execute:soql (body params)
   "Execute a block of SOQL code with org-babel.
 BODY is the SOQL query, PARAMS are header arguments."
-  (let* ((async-debug t)
-         (processed-params (org-babel-process-params params))
-         (full-body (org-babel-expand-body:soql body params processed-params))
+  (let* ((processed-params (org-babel-process-params params))
+         (context (org-babel-expand-body:soql body params processed-params))
          (file-temp (make-temp-file "soql"))
-         (org (ob-soql--get-param :org processed-params))
-         (org-url (ob-soql-utils--org-url org))
-         (output-format (intern (or (ob-soql--get-param :output processed-params) "org-table")))
-         (sobject (ob-soql-utils--extract-sobject full-body))
+         (output-format (ob-soql--get-param :output processed-params))
+         (sobject (ob-soql--extract-sobject context))
          (editable (ob-soql--get-param :editable processed-params)))
 
-    (if (and org org-url)
-        (progn (write-region full-body nil file-temp)
-               (ob-soql--data file-temp `(,org ,org-url ,full-body ,output-format ,sobject ,editable)))
-      "Something error")))
+    (write-region context nil file-temp)
 
-(defun ob-soql--data (file org-attr)
+    (apply #'ob-soql-dispatch-soql file-temp
+           (list context
+              output-format
+              sobject
+              editable))))
+
+(defun ob-soql-dispatch-soql (file &rest org-attrs)
   "Execute SOQL query stored in FILE against ORG-ATTR.
-ORG-ATTR is a list: (ORG URL QUERY OUTPUT-FORMAT SOBJECT EDITABLE).
+ORG-ATTRS is a list: (ORG URL QUERY OUTPUT-FORMAT SOBJECT EDITABLE).
 Results are inserted asynchronously."
-  (pcase-let ((`(,org ,_url ,_query ,_output-format ,sobject ,_editable) org-attr))
-    (emacs-job
-     (salesforce-core--data-process
-      :args `("query" "-f" ,file "-o" ,org "--result-format=csv")
-      :parser #'emacs-pp-parser-raw)
-     (lambda (csv-content)
-       (let ((data (ob-soql--convert-csv-to-lisp-data csv-content)))
-         (ob-soql--display-tablist-results data header))))))
+  (declare (indent 1))
+  (pcase-let ((`(,_query ,_output-format ,sobject ,_editable) org-attrs)
+              (org (salesforce-project-org salesforce-project-session)))
 
-(defun ob-soql--tablist-results (csv url query sobject editable)
+    (emacs-pp-job
+     (lambda ()
+       (salesforce-core--data-process
+        :args `("query" "-f" ,file "-o" ,org "--result-format=csv")
+        :parser #'ob-soql--parse-csv))
+     (lambda (data)
+       (let ((header (car data))
+             (raw-data (cdr data)))
+         (ob-soql--tablist-results header
+           :data raw-data
+           :buffer (generate-new-buffer (format "*SOQL: %s*" (or sobject "Results")))))))))
+
+(defun ob-soql--tablist-columns (columns)
+  "Create HEADERS for tablist."
+  (apply #'vector
+         (cl-loop for header in columns
+                  collect (list header 30 t))))
+
+(defun ob-soql--tablist-data (data)
+  "Create DATA for tablist."
+  (cl-loop for item in data
+           as id = (elt item 0)
+           collect (cons id
+                         (make-instance 'tablist-plus-data
+                                        :key id
+                                        :data item))))
+
+(cl-defun ob-soql--tablist-results (header &key data buffer)
   "Display CSV results in a tablist-plus buffer.
 CSV is the raw data, URL for hyperlinks, QUERY for context.
 SOBJECT is the object type, EDITABLE enables edit actions."
-  (let* ((lines (split-string csv "\n" t))
-         (headers (split-string (car lines) ","))
-         (rows (cdr lines))
-         (columns (ob-soql--build-columns headers))
-         (data (ob-soql--build-table-data rows headers url)))
-    (let ((table (tablist-plus-create-table
-                  columns
-                  :data data
-                  :page-size 50
-                  :buffer-name (format "*SOQL: %s*" (or sobject "Results")))))
-      (tablist-plus-table-render table)
-      (pop-to-buffer (tablist-plus-table-buffer table)))))
+  (declare (indent 1))
+  (let* ((columns (ob-soql--tablist-columns header))
+         (data (ob-soql--tablist-data data))
+         (table (apply #'ob-soql--create-tablist columns
+                       :data data
+                       (list :page-size 50
+                          :buffer buffer))))
+    (tablist-plus-table-render table)
+    (pop-to-buffer (tablist-plus-table-buffer table))))
 
 (defun ob-soql--get-param (key param-list)
   "Extract param in list."
