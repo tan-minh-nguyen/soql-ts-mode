@@ -27,42 +27,27 @@
 ;;; Section 1: SOQL-to-Apex Variable Passing
 ;;; ========================================
 
-(defvar ob-soql-vars--query-cache (make-hash-table :test 'equal)
-  "Cache mapping block names to SOQL query strings.")
-
-(defun ob-soql-vars-store-query (name query-string)
-  "Store QUERY-STRING under NAME for use by Apex blocks."
-  (when (and name query-string)
-    (let ((normalized (ob-soql-vars--normalize-query query-string)))
-      (puthash name normalized ob-soql-vars--query-cache)
-      normalized)))
-
-(defun ob-soql-vars-get-query (name)
-  "Retrieve stored SOQL query string by NAME."
-  (gethash name ob-soql-vars--query-cache))
-
 (defun ob-soql-vars--normalize-query (query)
   "Normalize QUERY for use in Apex."
   (let* ((trimmed (string-trim query))
          (single-line (string-join (split-string trimmed "\n" t "[ \t]+") " ")))
     (replace-regexp-in-string "[ \t]+" " " single-line)))
 
-(defun ob-soql--parse-csv (process)
+(defun ob-soql--csv-to-org-table (csv)
+  "Convert csv string to org-table."
+  (with-temp-buffer
+    (insert csv)
+    (org-table-convert-region (point-min) (point-max))))
+
+(defun ob-soql--csv-to-lisp (csv)
+  "Convert csv to org-table then lisp-data."
+  (org-table-to-lisp
+   (substring-no-properties (ob-soql--csv-to-org-table csv))))
+
+(defun ob-soql--parse-csv-to-lisp (process)
   "Convert csv to org-table then lisp-data."
   (let ((csv-content (emacs-pp-parser-raw process)))
-    (with-temp-buffer
-      (insert csv-content)
-      (org-table-convert-region (point-min) (point-max))
-      (org-table-to-lisp
-       (buffer-substring-no-properties (point-min) (point-max))))))
-
-(defun ob-soql--parse-csv-org-table (process)
-  "Convert CSV to org-table string directly."
-  (let ((csv-content (emacs-pp-parser-raw process)))
-    (with-temp-buffer
-      (insert csv-content)
-      (org-table-convert-region (point-min) (point-max))
-      (buffer-string))))
+    (ob-soql--csv-to-lisp csv-content)))
 
 (cl-defun ob-soql--create-tablist (columns &rest args &key data &allow-other-keys)
   "Display CSV results in a tablist-plus buffer.
@@ -86,12 +71,6 @@ SOBJECT is the object type, EDITABLE enables edit actions."
       (format "List<SObject> %s = Database.query('%s');"
               var-name
               (replace-regexp-in-string "'" "\\\\'" query-string)))))
-
-(defun ob-soql-vars--capture-query (body params)
-  "Capture SOQL BODY before execution."
-  (when-let* ((info (org-babel-get-src-block-info))
-              (name (nth 4 info)))
-    (ob-soql-vars-store-query name body)))
 
 (defun ob-soql--extract-sobject (query)
   "Extract primary SObject from SOQL QUERY."
@@ -130,13 +109,30 @@ SOBJECT is the object type, EDITABLE enables edit actions."
                  (mapcar (lambda (line)
                            (let ((cols (string-split line ",")))
                              (when (< id-pos (length cols))
-                               (setf (nth id-pos cols)
+                               (setf (elt cols id-pos)
                                      (ob-soql-utils--convert-id-to-hyperlink
                                       (nth id-pos cols) org-hyperlink)))
                              (string-join cols ",")))
                          rows))
            "\n")
         csv))))
+
+(defun ob-soql--extract-column (var)
+  "Extract column name of VAR block."
+  (if (string-match-p ",\\([^]]\\)" var)
+      (match-string 1 var)
+    "Id"))
+
+(cl-defun ob-soql--extract-result-data (data &key (column "Id"))
+  "Extract result of block to list of DATA by COLUMN."
+  (declare (indent 1))
+  (let* ((columns (car data))
+         (rows (cdr data))
+         (column-pos (seq-position columns column #'string-match-p)))
+
+    (cl-loop for row in rows
+             as row-value = (elt row column-pos)
+             collect row-value)))
 
 (defun ob-soql-utils--convert-id-to-hyperlink (id org-hyperlink)
   "Convert Salesforce ID into an ORG-HYPERLINK."
