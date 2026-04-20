@@ -48,15 +48,21 @@
     (replace-regexp-in-string "[ \t]+" " " single-line)))
 
 (defun ob-soql--parse-csv (process)
-  "Convert csv to org-table then lisp-data"
+  "Convert csv to org-table then lisp-data."
   (let ((csv-content (emacs-pp-parser-raw process)))
     (with-temp-buffer
       (insert csv-content)
-      (org-table-convert-region
-       (point-min)
-       (point-max))
+      (org-table-convert-region (point-min) (point-max))
       (org-table-to-lisp
        (buffer-substring-no-properties (point-min) (point-max))))))
+
+(defun ob-soql--parse-csv-org-table (process)
+  "Convert CSV to org-table string directly."
+  (let ((csv-content (emacs-pp-parser-raw process)))
+    (with-temp-buffer
+      (insert csv-content)
+      (org-table-convert-region (point-min) (point-max))
+      (buffer-string))))
 
 (cl-defun ob-soql--create-tablist (columns &rest args &key data &allow-other-keys)
   "Display CSV results in a tablist-plus buffer.

@@ -42,6 +42,7 @@
 (require 'ob-soql-utils)
 (require 'tablist-plus)
 
+
 (add-to-list 'org-babel-tangle-lang-exts '("soql" . "soql"))
 
 (add-to-list 'org-src-lang-modes '("soql" . soql-ts))
@@ -97,41 +98,23 @@
 
 (defun org-babel-execute:soql (body params)
   "Execute a block of SOQL code with org-babel.
-BODY is the SOQL query, PARAMS are header arguments."
+BODY is the SOQL query, PARAMS are header arguments.
+Dispatches to org-table or tablist output based on :output parameter."
   (let* ((processed-params (org-babel-process-params params))
          (context (org-babel-expand-body:soql body params processed-params))
          (file-temp (make-temp-file "soql"))
          (output-format (ob-soql--get-param :output processed-params))
          (sobject (ob-soql--extract-sobject context))
-         (editable (ob-soql--get-param :editable processed-params)))
+         (result-params (assq :results processed-params))
+         (info (org-babel-get-src-block-info)))
 
     (write-region context nil file-temp)
 
-    (apply #'ob-soql-dispatch-soql file-temp
-           (list context
-              output-format
-              sobject
-              editable))))
-
-(defun ob-soql-dispatch-soql (file &rest org-attrs)
-  "Execute SOQL query stored in FILE against ORG-ATTR.
-ORG-ATTRS is a list: (ORG URL QUERY OUTPUT-FORMAT SOBJECT EDITABLE).
-Results are inserted asynchronously."
-  (declare (indent 1))
-  (pcase-let ((`(,_query ,_output-format ,sobject ,_editable) org-attrs)
-              (org (salesforce-project-org salesforce-project-session)))
-
-    (emacs-pp-job
-     (lambda ()
-       (salesforce-core--data-process
-        :args `("query" "-f" ,file "-o" ,org "--result-format=csv")
-        :parser #'ob-soql--parse-csv))
-     (lambda (data)
-       (let ((header (car data))
-             (raw-data (cdr data)))
-         (ob-soql--tablist-results header
-           :data raw-data
-           :buffer (generate-new-buffer (format "*SOQL: %s*" (or sobject "Results")))))))))
+    (pcase output-format
+      ("org-table"
+       (ob-soql--output-org-table file-temp context info processed-params))
+      (_
+       (ob-soql--output-tablist file-temp context sobject)))))
 
 (defun ob-soql--tablist-columns (columns)
   "Create HEADERS for tablist."
@@ -179,7 +162,53 @@ SOBJECT is the object type, EDITABLE enables edit actions."
                                          soql))
            finally return soql))
 
-;; Hints value base on value of header arguments 
+(defun ob-soql--replace-job-id (buffer job-id result)
+  "In BUFFER, replace JOB-ID placeholder with RESULT."
+  (when (buffer-live-p buffer)
+    (with-current-buffer buffer
+      (save-excursion
+        (goto-char (point-min))
+        (when (search-forward job-id nil t)
+          (replace-match result t t))))))
+
+(defun ob-soql--output-org-table (file _context _info _result-params)
+  "Execute SOQL from FILE and insert result as org-table.
+Returns job-id which org-babel inserts as placeholder.
+:finally replaces placeholder with actual org-table result."
+  (let* ((org (salesforce-project-org salesforce-project-session))
+         (src-buffer (current-buffer))
+         (result-holder (list nil)))
+    (emacs-pp-job
+     (lambda ()
+       (salesforce-core--data-process
+        :args `("query" "-f" ,file "-o" ,org "--result-format=csv")
+        :parser #'ob-soql--parse-csv-org-table))
+     (lambda (org-table-str)
+       (setcar result-holder org-table-str))
+     :finally
+     (lambda (job)
+       (when (car result-holder)
+         (ob-soql--replace-job-id src-buffer
+                                   (emacs-pp-job-id job)
+                                   (car result-holder)))))))
+
+(defun ob-soql--output-tablist (file context sobject)
+  "Execute SOQL from FILE and display in tablist buffer.
+This is the original ob-soql-dispatch-soql behavior."
+  (let ((org (salesforce-project-org salesforce-project-session)))
+    (emacs-pp-job
+     (lambda ()
+       (salesforce-core--data-process
+        :args `("query" "-f" ,file "-o" ,org "--result-format=csv")
+        :parser #'ob-soql--parse-csv))
+     (lambda (data)
+       (let ((header (car data))
+             (raw-data (cdr data)))
+         (ob-soql--tablist-results header
+           :data raw-data
+           :buffer (generate-new-buffer (format "*SOQL: %s*" (or sobject "Results")))))))))
+
+;; Hints value base on value of header arguments
 (defun org-babel-prep-session:soql (session params)
   "Prepare SESSION according to the header arguments specified in PARAMS.")
 
@@ -194,5 +223,4 @@ Return the initialized session."
   (unless (string= session "none")))
 
 (provide 'ob-soql)
-
 ;;; ob-soql.el ends here
