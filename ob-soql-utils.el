@@ -37,7 +37,8 @@
   "Convert csv string to org-table."
   (with-temp-buffer
     (insert csv)
-    (org-table-convert-region (point-min) (point-max))))
+    (org-table-convert-region (point-min) (point-max))
+    (buffer-string)))
 
 (defun ob-soql--csv-to-lisp (csv)
   "Convert csv to org-table then lisp-data."

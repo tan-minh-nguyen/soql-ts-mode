@@ -108,8 +108,7 @@ Dispatches to org-table or tablist output based on :output parameter."
          (file-temp (make-temp-file "soql"))
          (output-format (ob-soql--get-param :output processed-params))
          (sobject (ob-soql--extract-sobject context))
-         (org (assq :results processed-params))
-         (result-params (assq :results processed-params)))
+         (org (ob-soql--get-param :org processed-params)))
 
     (write-region context nil file-temp)
 
