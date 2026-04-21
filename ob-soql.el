@@ -108,16 +108,16 @@ Dispatches to org-table or tablist output based on :output parameter."
          (file-temp (make-temp-file "soql"))
          (output-format (ob-soql--get-param :output processed-params))
          (sobject (ob-soql--extract-sobject context))
-         (result-params (assq :results processed-params))
-         (info (org-babel-get-src-block-info)))
+         (org (assq :results processed-params))
+         (result-params (assq :results processed-params)))
 
     (write-region context nil file-temp)
 
     (pcase output-format
       ("org-table"
-       (ob-soql--output-org-table file-temp context info processed-params))
+       (ob-soql--output-org-table file-temp :org org))
       (_
-       (ob-soql--output-tablist file-temp context sobject)))))
+       (ob-soql--output-tablist file-temp sobject :org org)))))
 
 (defun ob-soql--tablist-columns (columns)
   "Create HEADERS for tablist."
@@ -171,13 +171,15 @@ SOBJECT is the object type, EDITABLE enables edit actions."
         (when (search-forward job-id nil t)
           (replace-match result t t))))))
 
-(defun ob-soql--output-org-table (file _context _info _result-params)
+(cl-defun ob-soql--output-org-table (file &key org)
   "Execute SOQL from FILE and insert result as org-table.
 Returns job-id which org-babel inserts as placeholder.
 :finally replaces placeholder with actual org-table result."
-  (let* ((org (salesforce-project-org salesforce-project-session))
+  (declare (indent 1))
+  (let* ((org (or org (salesforce-project-org salesforce-project-session)))
          (src-buffer (current-buffer))
          result)
+
     (emacs-pp-job-enqueue
      (lambda ()
        (salesforce-core--data-process
@@ -188,17 +190,20 @@ Returns job-id which org-babel inserts as placeholder.
      :finally
      (lambda (job)
        ;; Save block result
-       (puthash (emacs-pp-job-id job)
-                (ob-soql--csv-to-lisp result)
-                ob-soql-block-results)
+       (with-current-buffer src-buffer
+         (puthash (emacs-pp-job-id job)
+                  (ob-soql--csv-to-lisp result)
+                  ob-soql-block-results))
        (ob-soql--replace-job-id src-buffer
                                 (emacs-pp-job-id job)
                                 (ob-soql--csv-to-org-table))))))
 
-(defun ob-soql--output-tablist (file context sobject)
+(cl-defun ob-soql--output-tablist (file sobject &key org)
   "Execute SOQL from FILE and display in tablist buffer.
 This is the original ob-soql-dispatch-soql behavior."
-  (let ((org (salesforce-project-org salesforce-project-session))
+  (declare (indent 1))
+  (let ((org (or org (salesforce-project-org salesforce-project-session)))
+        (src-buffer (current-buffer))
         result)
     (emacs-pp-job-enqueue
      (lambda ()
@@ -217,8 +222,10 @@ This is the original ob-soql-dispatch-soql behavior."
            :buffer (generate-new-buffer (format "*SOQL: %s*" (or sobject "Results"))))))
      :finally
      (lambda (job)
-       (puthash (emacs-pp-job-id job)
-                result)))))
+       (with-current-buffer src-buffer
+         (puthash (emacs-pp-job-id job)
+                  result
+                  ob-soql-block-results))))))
 
 ;; Hints value base on value of header arguments
 (defun org-babel-prep-session:soql (session params)
