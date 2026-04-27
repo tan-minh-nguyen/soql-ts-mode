@@ -33,12 +33,23 @@
          (single-line (string-join (split-string trimmed "\n" t "[ \t]+") " ")))
     (replace-regexp-in-string "[ \t]+" " " single-line)))
 
+(cl-defun ob-soql--ensure-query-limit (soql &key params)
+  "Limit results return avoid poor performance."
+  (declare (indent 1))
+  (if (string-match-p "LIMIT" soql) soql
+    (format "%s LIMIT %s" soql (ob-soql--get-param :limit params))))
+
 (defun ob-soql--csv-to-org-table (csv)
   "Convert csv string to org-table."
   (with-temp-buffer
     (insert csv)
     (org-table-convert-region (point-min) (point-max))
     (buffer-string)))
+
+(defun ob-soql--dependent-call-p ()
+  "Return t, weather call from depend block."
+  (and org-babel-current-src-block-location
+     (not (equal (point) org-babel-current-src-block-location))))
 
 (defun ob-soql--csv-to-lisp (csv)
   "Convert csv to org-table then lisp-data."
@@ -118,13 +129,18 @@ SOBJECT is the object type, EDITABLE enables edit actions."
            "\n")
         csv))))
 
+
+(defun ob-soql--get-param (key param-list)
+  "Extract param in list."
+  (cdr (assq key param-list)))
+
 (defun ob-soql--extract-column (var)
   "Extract column name of VAR block."
   (if (string-match-p ",\\([^]]\\)" var)
       (match-string 1 var)
     "Id"))
 
-(cl-defun ob-soql--extract-result-data (data &key (column "Id"))
+(cl-defun ob-soql--extract-job-data (data &key (column "Id"))
   "Extract result of block to list of DATA by COLUMN."
   (declare (indent 1))
   (let* ((columns (car data))
@@ -133,7 +149,7 @@ SOBJECT is the object type, EDITABLE enables edit actions."
 
     (cl-loop for row in rows
              as row-value = (elt row column-pos)
-             collect row-value)))
+             collect (concat "'" row-value "'"))))
 
 (defun ob-soql-utils--convert-id-to-hyperlink (id org-hyperlink)
   "Convert Salesforce ID into an ORG-HYPERLINK."
