@@ -46,11 +46,6 @@
     (org-table-convert-region (point-min) (point-max))
     (buffer-string)))
 
-(defun ob-soql--dependent-call-p ()
-  "Return t, weather call from depend block."
-  (and org-babel-current-src-block-location
-     (not (equal (point) org-babel-current-src-block-location))))
-
 (defun ob-soql--csv-to-lisp (csv)
   "Convert csv to org-table then lisp-data."
   (org-table-to-lisp
@@ -133,12 +128,6 @@ SOBJECT is the object type, EDITABLE enables edit actions."
 (defun ob-soql--get-param (key param-list)
   "Extract param in list."
   (cdr (assq key param-list)))
-
-(defun ob-soql--extract-column (var)
-  "Extract column name of VAR block."
-  (if (string-match-p ",\\([^]]\\)" var)
-      (match-string 1 var)
-    "Id"))
 
 (cl-defun ob-soql--extract-job-data (data &key (column "Id"))
   "Extract result of block to list of DATA by COLUMN."

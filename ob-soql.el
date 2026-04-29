@@ -76,10 +76,10 @@
          (vars (org-babel--get-vars parse-params))
          (soql (ob-soql--ensure-query-limit body :params parse-params)))
 
-    (cl-loop for (key . value) in vars
-             as bind-value = (org-babel--soql-value:generic value :job-results job-results)
+    (cl-loop for (var . value) in vars
+             as bind-value = (org-babel--soql-value:generic value :job-results job-results :var var)
              do (setq soql
-                      (string-replace (format ":%s" key) bind-value))
+                      (string-replace (format ":%s" var) bind-value soql))
              finally return soql)))
 
 ;; This is the main function which is called to evaluate a code
@@ -102,23 +102,56 @@
 (defvar-local ob-soql--queue-jobs nil
   "Save queue jobs wait for execute.")
 
+(defcustom ob-soql-throttle 1
+  "Time that delay for running jobs.")
+
+(defvar-local ob-soql-timer nil
+  "Timer run jobs.")
+
 (defun org-babel-execute:soql (body params)
   "Execute a block of SOQL code with org-babel.
 BODY is the SOQL query, PARAMS are header arguments.
 Dispatches to org-table or tablist output based on :output parameter."
-  (cond
-   ;; Returns a job-id so other source blocks can reference this block's value.
-   ((ob-soql--dependent-call-p)
-    (let* ((job-id (ob-soql-execute:chain-src body params)))
-      (prog1 job-id
-        (push job-id ob-soql--queue-jobs))))
-   ;; Runs when executing multiple chained source blocks.
-   (ob-soql--queue-jobs
-    (apply #'emacs-pp-jobs-sequence
-           `(,@ob-soql--queue-jobs
-             ((lambda (job-results)
-                (ob-soql-execute:src ,body ,params :job-results job-results))))))
-   (t (ob-soql-execute:src body params))))
+  (when (timerp ob-soql-timer)
+    (cancel-timer ob-soql-timer))
+  (let* ((buffer (current-buffer))
+         (processed-params (org-babel-process-params params))
+         (output-format (ob-soql--get-param :output processed-params))
+         ;; (context (org-babel-expand-body:soql body params))
+         ;; (sobject (ob-soql--extract-sobject context))
+         (job-id (ob-soql-execute:src body params))
+         (run-seq-jobs
+          (lambda (jobs)
+            (apply #'emacs-pp-jobs-sequence
+                   :complete
+                   (lambda (job-results)
+                     (let ((data (gethash job-id job-results)))
+                       (with-current-buffer buffer
+                         (setq-local ob-soql--queue-jobs nil)
+                         (cancel-timer ob-soql-timer))
+                       (pcase output-format
+                         ("tablist"
+                          (let ((header (car data))
+                                (raw-data (cdr data)))
+                            (ob-soql--tablist-results header
+                              :data raw-data
+                              :buffer (generate-new-buffer (format "*SOQL: %s*" (or "Results"))))))
+                         ("org-table"
+                          (ob-soql--replace-job-id
+                           buffer
+                           job-id
+                           (with-temp-buffer
+                             (insert (orgtbl-to-orgtbl data nil))
+                             (buffer-string)))))))
+                   jobs))))
+
+    (prog1 job-id
+      (push job-id ob-soql--queue-jobs)
+      (setq-local ob-soql-timer
+                  (run-with-timer
+                   ob-soql-throttle nil
+                   run-seq-jobs
+                   (reverse ob-soql--queue-jobs))))))
 
 (defun ob-soql--tablist-columns (columns)
   "Create HEADERS for tablist."
@@ -145,32 +178,11 @@ SOBJECT is the object type, EDITABLE enables edit actions."
          (table (apply #'ob-soql--create-tablist columns
                        :data data
                        (list :page-size 50
-                          :buffer buffer))))
+                             :buffer buffer))))
     (tablist-plus-table-render table)
     (pop-to-buffer (tablist-plus-table-buffer table))))
 
-(cl-defun ob-soql-execute:src (body params &key job-results)
-  "Execute dependent block to use as chain.
-
-BODY: content of source block.
-PARAMS: parameter of source block."
-  ;; TODO: handle current block
-  (let* ((processed-params (org-babel-process-params params))
-         (context (org-babel-expand-body:soql body params :job-results job-results))
-         (file-temp (make-temp-file "soql"))
-         (output-format (ob-soql--get-param :output processed-params))
-         (sobject (ob-soql--extract-sobject context))
-         (org (ob-soql--get-param :org processed-params)))
-
-    (write-region context nil file-temp)
-
-    (pcase output-format
-      ("org-table"
-       (ob-soql--output-org-table file-temp :org org))
-      (_
-       (ob-soql--output-tablist file-temp sobject :org org)))))
-
-(cl-defun ob-soql-execute:chain-src (body params)
+(cl-defun ob-soql-execute:src (body params)
   "Execute dependent block to use as chain.
 
 BODY: content of source block.
@@ -185,12 +197,12 @@ PARAMS: parameter of source block."
             (org (or (ob-soql--get-param :org processed-params)
                      (salesforce-project-org salesforce-project-session))))
 
-       (prog1 (cons file org)
+       (prog1 (cons file-temp org)
          (write-region context nil file-temp))))
 
    (pcase-lambda (`(,file . ,org))
      (salesforce-core--data-process
-      :args '("query" "-f" ,file "-o" ,org "--result-format=csv")
+      :args `("query" "-f" ,file "-o" ,org "--result-format=csv")
       :parser #'ob-soql--parse-csv-to-lisp))))
 
 (defun ob-soql--replace-job-id (buffer job-id result)
@@ -201,76 +213,6 @@ PARAMS: parameter of source block."
         (goto-char (point-min))
         (when (search-forward job-id nil t)
           (replace-match result t t))))))
-
-(cl-defun ob-soql--make-job (file &key parser org finally)
-  "Execute SOQL from FILE and insert result as org-table.
-Returns job-id which org-babel inserts as placeholder.
-:finally replaces placeholder with actual org-table result."
-  (declare (indent 1))
-  (let (result)
-    (emacs-pp-job
-     (lambda ()
-       (salesforce-core--data-process
-        :args '("query" "-f" ,file "-o" ,org "--result-format=csv")
-        :parser parser))
-     (lambda (data)
-       (setq result data))
-     :finally
-     (lambda (job)
-       (setq ob-soql--queue-jobs nil)
-       ;; Save block result
-       (when finally
-         (funcall finally job :data result))))))
-
-(cl-defun ob-soql--output-org-table (file &key org)
-  "Execute SOQL from FILE and insert result as org-table.
-Returns job-id which org-babel inserts as placeholder.
-:finally replaces placeholder with actual org-table result."
-  (declare (indent 1))
-  (let* ((org (or org (salesforce-project-org salesforce-project-session)))
-         (src-buffer (current-buffer)))
-
-    (ob-soql--make-job file
-      :org org
-      :parser #'emacs-pp-parser-raw
-      :finally
-      (cl-function
-       (lambda (job &key data)
-         ;; Save block result, TODO: replace with better desgin
-         (with-current-buffer src-buffer
-           (puthash (emacs-pp-job-id job)
-                    (ob-soql--csv-to-lisp result)
-                    ob-soql-block-results))
-         (ob-soql--replace-job-id src-buffer
-                                  (emacs-pp-job-id job)
-                                  (ob-soql--csv-to-org-table)))))))
-
-(cl-defun ob-soql--output-tablist (file sobject &key org)
-  "Execute SOQL from FILE and display in tablist buffer.
-This is the original ob-soql-dispatch-soql behavior."
-  (declare (indent 1))
-  (let ((org (or org (salesforce-project-org salesforce-project-session)))
-        (src-buffer (current-buffer))
-        result)
-
-    (ob-soql--make-job file
-      :org org
-      :parser #'ob-soql--parse-csv-to-lisp
-      :finally
-      (cl-function
-       (lambda (job &key data)
-         (let ((header (car data))
-               (raw-data (cdr data)))
-
-           (ob-soql--tablist-results header
-                                     :data raw-data
-                                     :buffer (generate-new-buffer (format "*SOQL: %s*" (or sobject "Results")))))
-
-         ;; Save block result, TODO: replace with better desgin
-         (with-current-buffer src-buffer
-           (puthash (emacs-pp-job-id job)
-                    result
-                    ob-soql-block-results)))))))
 
 ;; Hints value base on value of header arguments
 (defun org-babel-prep-session:soql (session params)
@@ -286,28 +228,32 @@ specifying a var of the same value."
 specifying a var of the same value."
   (format "'%s'" (replace-regexp-in-string "'\\|\"" "" value)))
 
-(cl-defun org-babel--soql-value:job (value &key job-results)
+(cl-defun org-babel--soql-value:job (value &key job-results field)
   "Convert an elisp var into a string of template source code
 specifying a var of the same value."
   (let* ((data (gethash value job-results))
-         (src-headers (org-babel-get-src-block-info))
-         (pre-vars (nth 4 src-headers))
-         ;; get original value of var, to extract column use Id as default.
-         (column (ob-soql--extract-column (assoc-default value pre-vars))))
+         (values (ob-soql--extract-job-data data
+                   :column field)))
 
-    (if ((values (ob-soql--extract-job-data data
-                                            :column column)))
+    (if values
         (concat "(" (string-join values ",") ")")
       "null")))
 
-(cl-defun org-babel--soql-value:generic (value &key job-results)
+(defun org-babel--soql-object-field (var)
+  "Get field of this var to bind, default use Id."
+  (let* ((var (format "%s" var))
+         (fields (cdr (split-string var "\\."))))
+    (string-join (or fields (list "Id")) ".")))
+
+(cl-defun org-babel--soql-value:generic (value &key job-results var)
   "Convert an elisp var into a string of template source code
 specifying a var of the same value."
   (cond
-   ((string-prefix-p "emacs-pp-process")
-    (org-babel--soql-value:job value :job-results job-results))
-   ((or (string-prefix-p "'")
-       (string-prefix-p "\""))
+   ((string-prefix-p "emacs-pp-pipeline" value)
+    (let ((field (org-babel--soql-object-field var)))
+      (org-babel--soql-value:job value :job-results job-results :field field)))
+   ((or (string-prefix-p "'" value)
+        (string-prefix-p "\"" value))
     (org-babel--soql-value:string value))
    ((numberp value)
     (org-babel--soql-value:number value))
